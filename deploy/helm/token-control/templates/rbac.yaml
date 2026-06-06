@@ -12,12 +12,14 @@ rules:
       - clustertokenpolicies
       - tokenpolicies
       - modelcredentials
+      - modelclaims
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["governance.tokencontrol.io"]
     resources:
       - clustertokenpolicies/status
       - tokenpolicies/status
       - modelcredentials/status
+      - modelclaims/status
     verbs: ["get", "update", "patch"]
   - apiGroups: ["governance.tokencontrol.io"]
     resources:

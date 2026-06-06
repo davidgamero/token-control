@@ -113,4 +113,26 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["modelcredentials"]
         scope: Cluster
+  # ModelClaim structural + permit-preview validation. Fail-closed.
+  - name: vmodelclaim.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate-governance-tokencontrol-io-v1alpha1-modelclaim
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    rules:
+      - apiGroups: ["governance.tokencontrol.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelclaims"]
+        scope: Namespaced
 {{- end }}

@@ -31,6 +31,13 @@ func SetupWebhooksWithManager(mgr ctrl.Manager, cfg Config) error {
 	}
 
 	if err := ctrl.NewWebhookManagedBy(mgr).
+		For(&api.ModelClaim{}).
+		WithValidator(&ModelClaimValidator{Client: mgr.GetClient()}).
+		Complete(); err != nil {
+		return err
+	}
+
+	if err := ctrl.NewWebhookManagedBy(mgr).
 		For(&corev1.Pod{}).
 		WithValidator(&PodValidator{Client: mgr.GetClient(), Config: cfg}).
 		WithDefaulter(&PodDefaulter{Client: mgr.GetClient(), Config: cfg}).

@@ -64,16 +64,25 @@ spec:
   models:
     - provider: openai
       model: gpt-4o
-  credentialRef: { name: openai } # optional preference; resolver still authorizes
-  request:                        # optional declared budget (planning/audit)
-    tokensPerMinute: 50000
+      credentialRef: { name: openai } # optional preference; resolver still authorizes
   purpose: "support chatbot"      # free-form, for audit trails
 status:
   phase: Bound                    # Bound | Denied | Pending
   resolvedModels:
     - { provider: openai, model: gpt-4o, action: Allow, credential: openai, source: "ClusterTokenPolicy/baseline" }
+  boundCredentials: [openai]
   conditions: [ ... ]
 ```
+
+> **Implemented.** Option A shipped as the `ModelClaim` CRD
+> (`api/v1alpha1/modelclaim_types.go`), its validating webhook
+> (`internal/webhook/v1alpha1/modelclaim_webhook.go`), the `ModelClaimReconciler`
+> (`internal/controller/modelclaim_controller.go`) and `examples/07-modelclaim.yaml`. The
+> `credentialRef` is **per-model** (a `ModelRequest` field), used only as the injection
+> fallback when the resolved policy names no credential. A declared **budget** field was
+> intentionally omitted: token budgets already belong to the admin-owned `TokenPolicy` quota
+> tier, and a self-declared per-claim budget would duplicate (and could contradict) it. The
+> rest of this note is retained as the design rationale.
 
 ### Code deltas (surgical)
 

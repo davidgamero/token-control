@@ -6,6 +6,7 @@ package webhookv1alpha1
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,10 +37,15 @@ func (c Config) exempt(ns string) bool {
 	return ok
 }
 
-// declaredModel is a provider/model pair declared on a pod via the models annotation.
+// declaredModel is a provider/model pair a pod is governed for, sourced either from a
+// matching ModelClaim (preferred) or the legacy models annotation (fallback).
 type declaredModel struct {
 	Provider string
 	Model    string
+	// Credential is an optional injection preference carried from a ModelClaim's per-model
+	// credentialRef. It is used only as a fallback when the resolved policy names no
+	// credential for the model; the policy hierarchy remains authoritative.
+	Credential string
 }
 
 // parseModels reads the comma-separated "provider/model" declarations from a pod.
@@ -61,6 +67,61 @@ func parseModels(pod *corev1.Pod) []declaredModel {
 		out = append(out, declaredModel{Provider: strings.TrimSpace(parts[0]), Model: strings.TrimSpace(parts[1])})
 	}
 	return out
+}
+
+// declaredModelsForPod returns the set of provider/model declarations that govern a pod,
+// merging every ModelClaim whose selector matches the pod's identity (service account + pod
+// labels) with the legacy models annotation. Declarations are de-duplicated case-insensitively
+// by provider/model; a ModelClaim's credential preference is retained over the annotation's
+// (which carries none). ModelClaims are the strongly-typed, RBAC-controlled successor to the
+// self-asserted annotation, which is honored only as a fallback.
+func declaredModelsForPod(ctx context.Context, c client.Client, namespace string, pod *corev1.Pod) ([]declaredModel, error) {
+	type key struct{ p, m string }
+	seen := map[key]int{}
+	var out []declaredModel
+	add := func(provider, model, cred string) {
+		provider = strings.TrimSpace(provider)
+		model = strings.TrimSpace(model)
+		if provider == "" || model == "" {
+			return
+		}
+		k := key{strings.ToLower(provider), strings.ToLower(model)}
+		if idx, ok := seen[k]; ok {
+			if out[idx].Credential == "" && cred != "" {
+				out[idx].Credential = cred
+			}
+			return
+		}
+		seen[k] = len(out)
+		out = append(out, declaredModel{Provider: provider, Model: model, Credential: cred})
+	}
+
+	var claims api.ModelClaimList
+	if err := c.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
+		return nil, err
+	}
+	sort.Slice(claims.Items, func(i, j int) bool { return claims.Items[i].Name < claims.Items[j].Name })
+	sa := saOf(pod)
+	for i := range claims.Items {
+		cl := &claims.Items[i]
+		match, err := policy.WorkloadSelectorMatches(cl.Spec.Selector, pod.Labels, sa)
+		if err != nil || !match {
+			continue
+		}
+		for _, m := range cl.Spec.Models {
+			cred := ""
+			if m.CredentialRef != nil {
+				cred = m.CredentialRef.Name
+			}
+			add(m.Provider, m.Model, cred)
+		}
+	}
+
+	// Legacy annotation declarations carry no credential preference.
+	for _, dm := range parseModels(pod) {
+		add(dm.Provider, dm.Model, "")
+	}
+	return out, nil
 }
 
 func saOf(pod *corev1.Pod) string {

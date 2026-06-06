@@ -503,6 +503,12 @@ func NamespaceSelectorMatches(sel *metav1.LabelSelector, lbls map[string]string)
 	return selectorMatches(sel, lbls)
 }
 
+// WorkloadSelectorMatches reports whether a pod identity (labels + service account) satisfies
+// a WorkloadSelector. A nil or empty selector matches every workload in the namespace.
+func WorkloadSelectorMatches(sel *api.WorkloadSelector, podLabels map[string]string, sa string) (bool, error) {
+	return workloadMatches(sel, podLabels, sa)
+}
+
 // ValidGlob returns an error if pattern is not a valid path.Match glob.
 func ValidGlob(pattern string) error {
 	_, err := path.Match(pattern, "probe")

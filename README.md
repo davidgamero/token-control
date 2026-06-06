@@ -48,6 +48,7 @@ operator.
 | `ClusterTokenPolicy` | Cluster | Default allowlist/quota/enforcement/gateway for selected namespaces (broadest tier). |
 | `TokenPolicy` | Namespaced | Namespace-default (empty selector) or workload-scoped (selector) policy; may only narrow what it inherits. |
 | `ModelCredential` | Cluster | Binds a provider credential to authorized namespaces/models, defines how it is injected, and (optionally) declares the key's throughput `capacity` for planning. |
+| `ModelClaim` | Namespaced | A workload team's typed, RBAC-controlled declaration of the models it intends to call, selected by workload identity; the validated successor to the self-asserted pod annotation. |
 
 API group: `governance.tokencontrol.io/v1alpha1`. See [`docs/DESIGN.md`](docs/DESIGN.md) for
 the full architecture and the resolver semantics.
@@ -69,6 +70,12 @@ The **resolver** combines all matching cluster/namespace/workload policies: a mo
 permitted iff *no* tier denies it (an explicit `Deny`, or absence from a tier's allowlist).
 Quotas take the field-wise minimum. Credentials and gateway/enforcement settings come from the
 most specific tier.
+
+A workload's *intent* (which models it will call) can be declared either with the
+`governance.tokencontrol.io/models` pod annotation shown above or, preferably, with a
+[`ModelClaim`](examples/07-modelclaim.yaml): a namespaced, schema-validated object selected by
+workload identity (service accounts / pod labels) so the pods author nothing. Both are honored
+and merged; the annotation is the legacy fallback.
 
 ## Quickstart
 
@@ -113,6 +120,7 @@ Walk the hierarchy from broad to narrow in [`examples/`](examples/):
 | `04-tokenpolicy-workload.yaml` | Workload-scoped policy (selector + priority) narrowing further. |
 | `05-workload-deployment.yaml` | A governed workload declaring intent via annotation. |
 | `06-gateway-integration.yaml` | Generating Envoy AI Gateway / Kuadrant rate-limit objects. |
+| `07-modelclaim.yaml` | Declaring intended models with a `ModelClaim` selected by workload identity (no pod annotation). |
 
 ## Configuration
 
@@ -170,7 +178,7 @@ make install         # helm upgrade --install into the cluster
 api/v1alpha1/        CRD Go types + generated deepcopy
 internal/policy/     hierarchy resolver (the core decision engine) + tests
 internal/webhook/    validating/mutating webhooks (CRDs + pods)
-internal/controller/ ClusterTokenPolicy / TokenPolicy / ModelCredential reconcilers
+internal/controller/ ClusterTokenPolicy / TokenPolicy / ModelCredential / ModelClaim reconcilers
 internal/gateway/    Envoy AI Gateway / Kuadrant artifact generation
 internal/metrics/    Prometheus collectors
 cmd/main.go          manager wiring

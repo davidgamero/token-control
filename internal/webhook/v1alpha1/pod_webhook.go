@@ -49,7 +49,11 @@ func (v *PodValidator) validate(ctx context.Context, obj runtime.Object) (admiss
 	if v.Config.exempt(namespace) {
 		return nil, nil
 	}
-	declared := parseModels(pod)
+	declared, err := declaredModelsForPod(ctx, v.Client, namespace, pod)
+	if err != nil {
+		log.Error(err, "failed to resolve model claims; allowing pod", "namespace", namespace)
+		return nil, nil
+	}
 	if len(declared) == 0 {
 		return nil, nil
 	}
@@ -111,7 +115,11 @@ func (d *PodDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	if pod.GetAnnotations()[api.AnnotationInjectionDisabled] == "true" {
 		return nil
 	}
-	declared := parseModels(pod)
+	declared, err := declaredModelsForPod(ctx, d.Client, namespace, pod)
+	if err != nil {
+		log.Error(err, "failed to resolve model claims; skipping injection", "namespace", namespace)
+		return nil
+	}
 	if len(declared) == 0 {
 		return nil
 	}
@@ -126,13 +134,22 @@ func (d *PodDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	}
 
 	// Determine the ordered, unique set of credentials to bind for allowed declared models.
+	// The resolved policy credential wins; a ModelClaim's per-model credential preference is
+	// the fallback when the hierarchy permits the model but binds no credential of its own.
 	var credOrder []string
 	seen := map[string]bool{}
 	for _, dm := range declared {
 		dec := eff.Permit(dm.Provider, dm.Model)
-		if dec.Allowed && dec.Credential != "" && !seen[dec.Credential] {
-			seen[dec.Credential] = true
-			credOrder = append(credOrder, dec.Credential)
+		if !dec.Allowed {
+			continue
+		}
+		cred := dec.Credential
+		if cred == "" {
+			cred = dm.Credential
+		}
+		if cred != "" && !seen[cred] {
+			seen[cred] = true
+			credOrder = append(credOrder, cred)
 		}
 	}
 

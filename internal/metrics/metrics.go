@@ -61,6 +61,13 @@ var (
 		Help: "Number of permitted (Allow) models resolved for a policy.",
 	}, []string{"namespace", "policy"})
 
+	// ModelClaimAllowedModels reports the number of a ModelClaim's requested models that are
+	// permitted by the effective policy (the claim's bindable surface).
+	ModelClaimAllowedModels = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tokencontrol_modelclaim_allowed_models",
+		Help: "Number of a ModelClaim's requested models permitted by the effective policy.",
+	}, []string{"namespace", "claim"})
+
 	// GatewayArtifacts reports the number of generated gateway artifacts managed per policy.
 	GatewayArtifacts = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "tokencontrol_gateway_artifacts",
@@ -86,5 +93,6 @@ func init() {
 		EffectiveModels,
 		GatewayArtifacts,
 		TokensConsumed,
+		ModelClaimAllowedModels,
 	)
 }

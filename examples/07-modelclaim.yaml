@@ -1,0 +1,65 @@
+# Declaring intended models with a ModelClaim (the typed successor to the pod annotation).
+#
+# A ModelClaim is a namespaced, schema-validated, RBAC-controlled object in which a workload
+# team declares "these workloads will call these models". It is the bottom-up counterpart to
+# the top-down grants in ClusterTokenPolicy/TokenPolicy -- the LLM analogue of a
+# PersistentVolumeClaim against the available supply.
+#
+# Unlike the governance.tokencontrol.io/models pod annotation, the claim is selected by
+# workload identity (service accounts and/or pod labels), so the pods themselves declare
+# nothing and cannot tamper with the declaration. The controller resolves the claim against
+# the policy hierarchy and records the verdict in status (.status.phase = Bound | Denied),
+# while the pod admission webhook still makes the authoritative per-pod decision.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: ModelClaim
+metadata:
+  name: chat-api-models
+  namespace: team-a
+spec:
+  # Cover every "chat-api" pod running as the chat-api service account.
+  selector:
+    podSelector:
+      matchLabels:
+        app: chat-api
+    serviceAccounts:
+      - chat-api
+  # The provider/model combinations these workloads intend to call. Each is authorized by the
+  # policy hierarchy; a model not permitted by an effective Allow rule lands the claim in the
+  # Denied phase (and the pod webhook rejects pods that try to use it).
+  models:
+    - provider: openai
+      model: "gpt-4o"
+    - provider: openai
+      model: "gpt-4o-mini"
+      # Optional: a preferred credential, used only as the injection fallback when the
+      # resolved policy permits the model but binds no credential of its own.
+      credentialRef:
+        name: openai
+  # Free-form, recorded for auditing.
+  purpose: "Customer-facing chat assistant for team-a."
+---
+# The covered workload carries NO governance.tokencontrol.io/models annotation: its model
+# governance and credential injection are driven entirely by the ModelClaim above, matched by
+# the pod's labels and service account.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-api
+  namespace: team-a
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: chat-api
+  template:
+    metadata:
+      labels:
+        app: chat-api
+    spec:
+      serviceAccountName: chat-api
+      containers:
+        - name: app
+          image: ghcr.io/example/chat-api:latest
+          # OPENAI_API_KEY is injected automatically by the mutating webhook; do not set it.
+          ports:
+            - containerPort: 8080

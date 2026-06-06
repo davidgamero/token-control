@@ -44,13 +44,14 @@ governance analogue of `LimitRange`/`ResourceQuota`, but for models, credentials
                          +--------------------------------------------------+
                          |                 token-control manager            |
                          |                                                  |
-  kube-apiserver  <----> |  Admission webhooks         Controllers          |
-        |                |  - ValidatingWebhook        - ClusterTokenPolicy  |
-        |  admission      |    * ClusterTokenPolicy      - TokenPolicy        |
-        |  (CREATE/UPDATE)|    * TokenPolicy             - ModelCredential    |
-        v                |    * ModelCredential                              |
-   Pods / CRDs           |    * Pod (validate)         policy.Resolve()      |
-                         |  - MutatingWebhook           (effective decision) |
+  kube-apiserver  <----> |  Admission webhooks        Controllers           |
+        |                |  - ValidatingWebhook       - ClusterTokenPolicy   |
+        |  admission     |    * ClusterTokenPolicy    - TokenPolicy          |
+        | (CREATE/UPDATE)|    * TokenPolicy           - ModelCredential      |
+        v                |    * ModelCredential       - ModelClaim           |
+   Pods / CRDs           |    * ModelClaim                                   |
+                         |    * Pod (validate)        policy.Resolve()       |
+                         |  - MutatingWebhook          (effective decision)  |
                          |    * Pod (inject creds)                           |
                          +--------------------------------------------------+
                                    |                         |
@@ -67,6 +68,7 @@ governance analogue of `LimitRange`/`ResourceQuota`, but for models, credentials
 | `ClusterTokenPolicy`  | Cluster    | Default allowlist, quota, enforcement and gateway integration for selected namespaces. Broadest tier. |
 | `TokenPolicy`         | Namespaced | Namespace-default (empty selector) or workload-scoped (selector) policy. May only narrow what it inherits. |
 | `ModelCredential`     | Cluster    | Binds a provider credential (one source Secret) to the namespaces/models permitted to use it, and how it is injected. |
+| `ModelClaim`          | Namespaced | A workload team's typed, validated declaration of the models it intends to call, selected by workload identity. The bottom-up counterpart to the policy grants, and the successor to the self-asserted pod annotation. |
 
 CRDs are shipped in `deploy/helm/token-control/crds/` and installed by Helm. API group is
 `governance.tokencontrol.io/v1alpha1`.
@@ -110,9 +112,10 @@ controllers to populate a policy's `status.effectiveModels`/`effectiveQuota`.
 
 token-control enforces at two points, **neither of which is the request hot path**:
 
-1. **Admission gating (always on).** The pod validating webhook reads the
-   `governance.tokencontrol.io/models` annotation (a workload's declared intent) and checks
-   each declaration against the effective policy:
+1. **Admission gating (always on).** The pod validating webhook reads the workload's declared
+   intent — from any `ModelClaim` whose selector matches the pod's identity (service account /
+   labels) and/or the legacy `governance.tokencontrol.io/models` annotation, merged and
+   de-duplicated — and checks each declaration against the effective policy:
    - `Enforce` → deny the pod with a `403`/Forbidden listing the violations.
    - `Audit` → admit but attach warnings and increment violation metrics.
    - `Disabled`/ungoverned/exempt namespace → admit unchanged.
@@ -179,14 +182,17 @@ declared values alone, without live metering.
 ### Request / admission flow
 
 ```
-Author applies a Deployment whose pod template has:
-  annotations: { governance.tokencontrol.io/models: "openai/gpt-4o" }
+Author applies a Deployment whose pods are covered by a ModelClaim selecting their
+service account / labels (or, legacy, a pod template annotation):
+  ModelClaim: { selector: {serviceAccounts: [chat-api]}, models: [openai/gpt-4o] }
 
   apiserver --CREATE pod--> Mutating webhook (mpod)
+                              gather declared models (matching ModelClaims + annotation)
                               resolve effective policy
                               if governed & allowed: inject OPENAI_API_KEY from tc-cred-openai
                               annotate effective-policy / credentials-bound
   apiserver --CREATE pod--> Validating webhook (vpod)
+                              gather declared models (matching ModelClaims + annotation)
                               resolve effective policy
                               Enforce + violation  -> 403 Forbidden
                               Audit + violation     -> admit + Warning
@@ -196,10 +202,11 @@ Author applies a Deployment whose pod template has:
 
 ### Webhook configuration & failure policy
 
-- **CRD webhooks** (`ClusterTokenPolicy`, `TokenPolicy`, `ModelCredential`) use
+- **CRD webhooks** (`ClusterTokenPolicy`, `TokenPolicy`, `ModelCredential`, `ModelClaim`) use
   `failurePolicy: Fail` — governance objects must be structurally valid. Hierarchy
-  "widening" is surfaced as **warnings**, not hard errors: the runtime resolver is the real
-  control, so an Allow that is dead due to a broader Deny is flagged but not rejected.
+  "widening" (and, for a `ModelClaim`, a requested model the hierarchy won't permit) is
+  surfaced as **warnings**, not hard errors: the runtime resolver is the real control, so an
+  Allow that is dead due to a broader Deny is flagged but not rejected.
 - **Pod webhooks** use `failurePolicy: Ignore` — a webhook outage must never block unrelated
   pod scheduling. The pod webhooks also exclude the operator namespace, the configured
   exempt namespaces (`kube-system`, `kube-public`, `kube-node-lease` by default) and any
@@ -232,6 +239,7 @@ Prometheus collectors (registered on the controller-runtime registry, served on 
 | `tokencontrol_credential_allocated_tokens_per_minute` | gauge | credential |
 | `tokencontrol_credential_oversubscribed` | gauge | credential |
 | `tokencontrol_effective_models` | gauge | namespace, policy |
+| `tokencontrol_modelclaim_allowed_models` | gauge | namespace, claim |
 | `tokencontrol_gateway_artifacts` | gauge | namespace, type |
 | `tokencontrol_tokens_consumed_total` | counter | namespace, workload, provider, model |
 

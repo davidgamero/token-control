@@ -6,10 +6,14 @@ import (
 
 // Annotation and label keys consumed and produced by the controller and webhooks.
 const (
-	// AnnotationModels is set by workload authors to declare which provider/model
-	// combinations the workload intends to call, as a comma-separated list of
-	// "provider/model" tokens, e.g. "openai/gpt-4,anthropic/claude-3-5-sonnet".
-	// The admission webhook validates these declarations against the effective policy.
+	// AnnotationModels is a legacy, self-asserted declaration of which provider/model
+	// combinations a workload intends to call, as a comma-separated list of "provider/model"
+	// tokens, e.g. "openai/gpt-4,anthropic/claude-3-5-sonnet". The admission webhook validates
+	// these against the effective policy.
+	//
+	// Deprecated: prefer a ModelClaim, which is schema-validated, RBAC-controlled, carries a
+	// status, and is selected by workload identity rather than authored on the pod. The
+	// annotation is still honored as a fallback and is merged with any matching ModelClaims.
 	AnnotationModels = "governance.tokencontrol.io/models"
 
 	// AnnotationEffectivePolicy is written by the mutating webhook onto admitted pods
@@ -244,4 +248,7 @@ const (
 	// ConditionOversubscribed indicates a ModelCredential's allocated token budgets exceed
 	// its declared capacity (a planning signal; it does not block reconciliation).
 	ConditionOversubscribed = "Oversubscribed"
+	// ConditionBound indicates every model requested by a ModelClaim is permitted by the
+	// effective policy hierarchy.
+	ConditionBound = "Bound"
 )
