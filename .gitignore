@@ -1,0 +1,21 @@
+# Binaries / build output
+bin/
+dist/
+*.test
+*.out
+cover.out
+
+# Local kube/credentials
+kubeconfig
+*.kubeconfig
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Helm packaged charts
+*.tgz

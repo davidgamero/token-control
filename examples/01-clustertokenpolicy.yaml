@@ -1,0 +1,42 @@
+# Cluster-wide default LLM governance (the broadest tier of the hierarchy).
+#
+# This is the LLM analogue of a cluster-wide LimitRange/ResourceQuota: it sets the default
+# allowlist, token budget and enforcement mode for every namespace its selector matches.
+# Namespace- and workload-scoped TokenPolicies may only *narrow* (never widen) what is
+# allowed here.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: ClusterTokenPolicy
+metadata:
+  name: org-default
+spec:
+  # Enforce = reject non-conforming pods at admission. Use Audit to warn-only, or Disabled.
+  enforcement: Enforce
+
+  # An empty selector matches every namespace. Narrow this with labels in production, e.g.
+  # namespaceSelector:
+  #   matchLabels:
+  #     tokencontrol.io/tier: standard
+  namespaceSelector: {}
+
+  # Default allowlist. Model supports globs ("gpt-4o-*", "*"); Deny always beats Allow.
+  models:
+    - provider: openai
+      model: "gpt-4o-*"
+      action: Allow
+    - provider: anthropic
+      model: "claude-3-5-sonnet*"
+      action: Allow
+    # Org-wide guardrail: nobody may use this model, regardless of narrower policies.
+    - provider: openai
+      model: "gpt-3.5-*"
+      action: Deny
+
+  # Default per-namespace budget. Namespace policies may set smaller, never larger, values.
+  quota:
+    tokensPerMinute: 200000
+    requestsPerMinute: 1000
+    tokensPerDay: 50000000
+
+  # Fallback credential for any allowed model that does not name its own.
+  defaultCredentialRef:
+    name: openai

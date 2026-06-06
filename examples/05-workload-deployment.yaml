@@ -1,0 +1,38 @@
+# A governed workload.
+#
+# The workload declares which provider/model combinations it intends to call via the
+# governance.tokencontrol.io/models annotation (comma-separated "provider/model" tokens).
+# At admission:
+#   * the validating webhook checks each declaration against the effective policy and
+#     rejects the pod (Enforce) or warns (Audit) on any violation;
+#   * the mutating webhook injects the bound ModelCredential (here as OPENAI_API_KEY from
+#     the controller-synced "tc-cred-openai" Secret) so the container never references key
+#     material directly.
+#
+# Note the annotation goes on the POD template, not just the Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-api
+  namespace: team-a
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: chat-api
+  template:
+    metadata:
+      labels:
+        app: chat-api
+      annotations:
+        governance.tokencontrol.io/models: "openai/gpt-4o,openai/gpt-4o-mini"
+        # Opt this pod out of credential injection (validation still applies):
+        # governance.tokencontrol.io/inject-credentials-disabled: "true"
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: app
+          image: ghcr.io/example/chat-api:latest
+          # OPENAI_API_KEY is injected automatically by the mutating webhook; do not set it.
+          ports:
+            - containerPort: 8080

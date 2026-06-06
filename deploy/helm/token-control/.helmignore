@@ -1,0 +1,13 @@
+# Patterns to ignore when building Helm packages.
+.DS_Store
+.git/
+.gitignore
+*.tmproj
+*.swp
+*.bak
+*.tgz
+.idea/
+.vscode/
+# CI / docs not needed inside the packaged chart.
+ci/
+*.md

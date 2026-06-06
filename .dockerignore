@@ -1,0 +1,9 @@
+# Keep the Docker build context minimal: only go.mod/go.sum and the Go source trees are
+# needed by the Dockerfile. Everything else is excluded so context uploads stay small and
+# image layers do not change on doc/chart edits.
+*
+!go.mod
+!go.sum
+!cmd/
+!api/
+!internal/

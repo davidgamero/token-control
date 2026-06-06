@@ -1,0 +1,50 @@
+# This file declares the layout for kubebuilder-compatible tooling.
+domain: tokencontrol.io
+layout:
+- go.kubebuilder.io/v4
+projectName: token-control
+repo: github.com/token-control/token-control
+resources:
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: tokencontrol.io
+  group: governance
+  kind: ClusterTokenPolicy
+  path: github.com/token-control/token-control/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: tokencontrol.io
+  group: governance
+  kind: TokenPolicy
+  path: github.com/token-control/token-control/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: tokencontrol.io
+  group: governance
+  kind: ModelCredential
+  path: github.com/token-control/token-control/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- kind: Pod
+  version: v1
+  webhooks:
+    defaulting: true
+    validation: true
+    webhookVersion: v1
+version: "3"

@@ -1,0 +1,30 @@
+# Workload-scoped policy.
+#
+# A TokenPolicy with a selector targets specific workloads (by pod labels and/or service
+# accounts) and further narrows the namespace default. Highest Priority wins when several
+# policies target the same workload. This one restricts the "batch" workloads in team-a to a
+# single cheap model and a much smaller budget than the namespace default.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: TokenPolicy
+metadata:
+  name: batch-workers
+  namespace: team-a
+spec:
+  priority: 10
+  selector:
+    podSelector:
+      matchLabels:
+        app: batch-worker
+    serviceAccounts:
+      - batch-runner
+
+  models:
+    - provider: openai
+      model: "gpt-4o-mini"
+      action: Allow
+      credentialRef:
+        name: openai
+
+  quota:
+    tokensPerMinute: 10000
+    requestsPerMinute: 60

@@ -1,0 +1,116 @@
+{{- if .Values.webhook.enabled }}
+{{- $svc := include "token-control.webhookServiceName" . -}}
+{{- $ns := include "token-control.namespace" . -}}
+{{- $caBundle := include "token-control.caBundle" . -}}
+{{- $exempt := concat (list $ns) .Values.controller.exemptNamespaces | uniq -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "token-control.fullname" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ $ns }}/{{ include "token-control.fullname" . }}-serving-cert
+  {{- end }}
+webhooks:
+  # Pod governance: validate declared model usage against the effective policy. Fail-open.
+  - name: vpod.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate--v1-pod
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            {{- range $exempt }}
+            - {{ . }}
+            {{- end }}
+        - key: tokencontrol.io/governance
+          operator: NotIn
+          values: ["disabled"]
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: Namespaced
+  # ClusterTokenPolicy structural + hierarchy validation. Fail-closed.
+  - name: vclustertokenpolicy.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate-governance-tokencontrol-io-v1alpha1-clustertokenpolicy
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    rules:
+      - apiGroups: ["governance.tokencontrol.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clustertokenpolicies"]
+        scope: Cluster
+  # TokenPolicy structural + hierarchy (never-widen) validation. Fail-closed.
+  - name: vtokenpolicy.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate-governance-tokencontrol-io-v1alpha1-tokenpolicy
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    rules:
+      - apiGroups: ["governance.tokencontrol.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["tokenpolicies"]
+        scope: Namespaced
+  # ModelCredential validation. Fail-closed.
+  - name: vmodelcredential.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate-governance-tokencontrol-io-v1alpha1-modelcredential
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    rules:
+      - apiGroups: ["governance.tokencontrol.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelcredentials"]
+        scope: Cluster
+{{- end }}

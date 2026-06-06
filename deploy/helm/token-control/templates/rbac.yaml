@@ -1,0 +1,95 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "token-control.fullname" . }}-manager
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+rules:
+  # Governance CRDs and their status/finalizers.
+  - apiGroups: ["governance.tokencontrol.io"]
+    resources:
+      - clustertokenpolicies
+      - tokenpolicies
+      - modelcredentials
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["governance.tokencontrol.io"]
+    resources:
+      - clustertokenpolicies/status
+      - tokenpolicies/status
+      - modelcredentials/status
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["governance.tokencontrol.io"]
+    resources:
+      - tokenpolicies/finalizers
+    verbs: ["update"]
+  # Namespaces: selector evaluation for cluster policies and credential authorization.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Secrets: read the source credential and replicate managed copies into authorized namespaces.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events for operator observability.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Optional downstream gateway artifacts (applied only when the CRDs are installed).
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["backendtrafficpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kuadrant.io"]
+    resources: ["tokenratelimitpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "token-control.fullname" . }}-manager
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "token-control.fullname" . }}-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "token-control.serviceAccountName" . }}
+    namespace: {{ include "token-control.namespace" . }}
+---
+# Leader election (leases) and event emission are namespaced to the operator namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "token-control.fullname" . }}-leader-election
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "token-control.fullname" . }}-leader-election
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "token-control.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "token-control.serviceAccountName" . }}
+    namespace: {{ include "token-control.namespace" . }}
+{{- end -}}

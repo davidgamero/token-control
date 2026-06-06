@@ -1,0 +1,32 @@
+# Namespace-default policy.
+#
+# A TokenPolicy with an empty/omitted selector is the default for every workload in its
+# namespace. It inherits from the ClusterTokenPolicies that select this namespace and can
+# only narrow them: here we drop Anthropic (by publishing an OpenAI-only allowlist) and
+# tighten the per-minute token budget.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: TokenPolicy
+metadata:
+  name: namespace-default
+  namespace: team-a
+spec:
+  # No selector => applies to all workloads in team-a as the namespace baseline.
+
+  models:
+    # Publishing an allowlist makes anything not on it deny-by-omission within this scope,
+    # so team-a effectively loses the cluster's Anthropic allowance.
+    - provider: openai
+      model: "gpt-4o-mini"
+      action: Allow
+      credentialRef:
+        name: openai
+    - provider: openai
+      model: "gpt-4o"
+      action: Allow
+      credentialRef:
+        name: openai
+
+  # Narrower than the cluster default (200000 tpm); the resolver takes the field-wise min.
+  quota:
+    tokensPerMinute: 50000
+    requestsPerMinute: 200

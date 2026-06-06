@@ -1,0 +1,51 @@
+# Optional: generate downstream gateway rate-limit artifacts from a policy's quota.
+#
+# token-control stays out of the request hot path. When a policy opts into a gateway
+# integration, the controller GENERATES the gateway's native rate-limit object from the
+# resolved TokenQuota and lets the existing data plane enforce token budgets at request
+# time. The generated object is owned by the TokenPolicy (GC on delete) and is only applied
+# when the corresponding gateway CRDs are installed in the cluster.
+#
+# This example targets an Envoy AI Gateway route; set type: Kuadrant to emit a
+# TokenRateLimitPolicy instead.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: TokenPolicy
+metadata:
+  name: chat-api-gateway
+  namespace: team-a
+spec:
+  selector:
+    podSelector:
+      matchLabels:
+        app: chat-api
+
+  quota:
+    tokensPerMinute: 40000
+    requestsPerMinute: 300
+
+  gateway:
+    # One of: None (default), EnvoyAIGateway, Kuadrant.
+    type: EnvoyAIGateway
+    targetRef:
+      group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: chat-api-route
+      # namespace defaults to the policy namespace
+---
+# Kuadrant variant (emits kuadrant.io/v1alpha1 TokenRateLimitPolicy):
+#
+# apiVersion: governance.tokencontrol.io/v1alpha1
+# kind: TokenPolicy
+# metadata:
+#   name: chat-api-gateway-kuadrant
+#   namespace: team-a
+# spec:
+#   quota:
+#     tokensPerMinute: 40000
+#     tokensPerDay: 5000000
+#   gateway:
+#     type: Kuadrant
+#     targetRef:
+#       group: gateway.networking.k8s.io
+#       kind: Gateway
+#       name: external-gateway

@@ -1,0 +1,54 @@
+{{- if .Values.webhook.enabled }}
+{{- if .Values.webhook.certManager.enabled }}
+{{- /* cert-manager issues and rotates the serving certificate; ca-injector fills caBundle. */}}
+{{- if not .Values.webhook.certManager.issuerRef }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "token-control.fullname" . }}-selfsigned
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "token-control.fullname" . }}-serving-cert
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "token-control.webhookCertSecret" . }}
+  duration: {{ .Values.webhook.certManager.duration }}
+  renewBefore: {{ .Values.webhook.certManager.renewBefore }}
+  dnsNames:
+    - {{ include "token-control.webhookServiceName" . }}.{{ include "token-control.namespace" . }}.svc
+    - {{ include "token-control.webhookServiceName" . }}.{{ include "token-control.namespace" . }}.svc.cluster.local
+  issuerRef:
+    {{- if .Values.webhook.certManager.issuerRef }}
+    {{- toYaml .Values.webhook.certManager.issuerRef | nindent 4 }}
+    {{- else }}
+    name: {{ include "token-control.fullname" . }}-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+    {{- end }}
+{{- else }}
+{{- /* Chart-managed self-signed certificate, reused across upgrades (see gen-certs). */}}
+{{- include "token-control.gen-certs" . }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "token-control.webhookCertSecret" . }}
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ .Values._webhookCerts.tlsCert }}
+  tls.key: {{ .Values._webhookCerts.tlsKey }}
+  ca.crt: {{ .Values._webhookCerts.caCert }}
+{{- end }}
+{{- end }}

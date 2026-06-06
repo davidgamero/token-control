@@ -1,0 +1,39 @@
+{{- if .Values.webhook.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "token-control.webhookServiceName" . }}
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "token-control.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-manager
+  ports:
+    - name: https
+      port: 443
+      targetPort: webhook
+      protocol: TCP
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "token-control.fullname" . }}-metrics
+  namespace: {{ include "token-control.namespace" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "token-control.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller-manager
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: metrics
+      protocol: TCP

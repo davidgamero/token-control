@@ -1,0 +1,51 @@
+{{- if .Values.webhook.enabled }}
+{{- $svc := include "token-control.webhookServiceName" . -}}
+{{- $ns := include "token-control.namespace" . -}}
+{{- $caBundle := include "token-control.caBundle" . -}}
+{{- $exempt := concat (list $ns) .Values.controller.exemptNamespaces | uniq -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "token-control.fullname" . }}
+  labels:
+    {{- include "token-control.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ $ns }}/{{ include "token-control.fullname" . }}-serving-cert
+  {{- end }}
+webhooks:
+  # Bind provider credentials into governed pods at admission. Fail-open.
+  - name: mpod.governance.tokencontrol.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    matchPolicy: Equivalent
+    reinvocationPolicy: IfNeeded
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /mutate--v1-pod
+        port: 443
+      {{- if $caBundle }}
+      caBundle: {{ $caBundle }}
+      {{- end }}
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            {{- range $exempt }}
+            - {{ . }}
+            {{- end }}
+        - key: tokencontrol.io/governance
+          operator: NotIn
+          values: ["disabled"]
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+{{- end }}

@@ -1,0 +1,63 @@
+token-control {{ .Chart.AppVersion }} is installed in namespace "{{ include "token-control.namespace" . }}".
+
+Release:   {{ .Release.Name }}
+Image:     {{ include "token-control.image" . }}
+Webhooks:  {{ ternary "enabled" "disabled" .Values.webhook.enabled }}
+{{- if .Values.webhook.enabled }}
+Certs:     {{ ternary "cert-manager" "chart self-signed" .Values.webhook.certManager.enabled }}
+{{- end }}
+
+Next steps:
+
+1. Verify the manager is running:
+
+   kubectl -n {{ include "token-control.namespace" . }} rollout status deploy/{{ include "token-control.fullname" . }}
+
+2. Create a cluster-wide default policy (broadest tier). Example:
+
+   apiVersion: governance.tokencontrol.io/v1alpha1
+   kind: ClusterTokenPolicy
+   metadata:
+     name: org-default
+   spec:
+     enforcement: Enforce
+     namespaceSelector: {}        # all namespaces
+     models:
+       - provider: openai
+         model: "gpt-4o-*"
+         action: Allow
+     quota:
+       tokensPerMinute: 100000
+
+3. Register a centrally-managed provider credential (Secret stays in this namespace and is
+   replicated only into authorized namespaces as "tc-cred-<name>"):
+
+   kubectl -n {{ include "token-control.namespace" . }} create secret generic openai \
+     --from-literal=apiKey=sk-...
+
+   apiVersion: governance.tokencontrol.io/v1alpha1
+   kind: ModelCredential
+   metadata:
+     name: openai
+   spec:
+     provider: openai
+     secretRef:
+       name: openai
+       key: apiKey
+     allowedNamespaces: ["team-a"]
+
+4. A governed workload declares intent with an annotation; the webhook validates it and
+   injects the bound credential:
+
+   metadata:
+     annotations:
+       governance.tokencontrol.io/models: "openai/gpt-4o-mini"
+
+Governance is enforced at admission. To exempt a namespace, label it:
+
+   kubectl label namespace <ns> tokencontrol.io/governance=disabled
+
+Metrics are exposed on the "{{ include "token-control.fullname" . }}-metrics" Service (port {{ .Values.metrics.service.port }}, path /metrics).
+{{- if not .Values.metrics.serviceMonitor.enabled }}
+Set metrics.serviceMonitor.enabled=true to scrape them with the Prometheus Operator.
+{{- end }}

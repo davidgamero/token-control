@@ -1,0 +1,136 @@
+# Default values for token-control.
+# This is a YAML-formatted file. Values are documented inline.
+
+# -- Override the chart name used in resource names (defaults to the chart name).
+nameOverride: ""
+# -- Override the fully-qualified app name used in resource names.
+fullnameOverride: ""
+
+image:
+  # -- Manager image repository.
+  repository: ghcr.io/token-control/token-control
+  # -- Image tag. Defaults to the chart's appVersion when empty.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+# -- Image pull secrets for private registries.
+imagePullSecrets: []
+
+# -- Number of manager replicas. Leader election ensures a single active reconciler;
+# additional replicas provide webhook HA. Use >=2 with podDisruptionBudget for HA.
+replicaCount: 1
+
+controller:
+  # -- Enable leader election (recommended; required when replicaCount > 1).
+  leaderElect: true
+  # -- Namespaces exempt from pod governance (the operator namespace is always exempt).
+  # These are also excluded from the pod webhooks via namespaceSelector.
+  exemptNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+  # -- Additional command-line arguments passed to the manager.
+  extraArgs: []
+
+# -- Additional environment variables for the manager container.
+extraEnv: []
+
+serviceAccount:
+  # -- Create a ServiceAccount for the manager.
+  create: true
+  # -- Name of the ServiceAccount to use. Generated when empty and create is true.
+  name: ""
+  # -- Annotations to add to the ServiceAccount (e.g. for IRSA/Workload Identity).
+  annotations: {}
+
+rbac:
+  # -- Create the ClusterRole/Role and bindings the manager needs.
+  create: true
+
+webhook:
+  # -- Enable the admission webhook server and register the webhook configurations.
+  enabled: true
+  # -- Port the webhook server listens on inside the pod.
+  port: 9443
+  # -- Failure policy for the pod webhooks. Ignore = fail-open so a webhook outage never
+  # blocks unrelated pod scheduling. The CRD webhooks always use Fail.
+  failurePolicy: Ignore
+  # -- Timeout (seconds) for webhook calls.
+  timeoutSeconds: 10
+  certManager:
+    # -- Use cert-manager to issue and rotate the webhook serving certificate instead of
+    # the chart's built-in self-signed certificate. Requires cert-manager + its CA injector.
+    enabled: false
+    # -- Reference an existing Issuer/ClusterIssuer. When empty a self-signed Issuer is
+    # created by the chart. Example: {name: my-issuer, kind: ClusterIssuer, group: cert-manager.io}
+    issuerRef: {}
+    # -- Validity duration of the issued certificate.
+    duration: 8760h
+    # -- Renew-before window for the issued certificate.
+    renewBefore: 720h
+
+metrics:
+  service:
+    # -- Port the metrics Service exposes (maps to the manager's :8080 metrics endpoint).
+    port: 8080
+  serviceMonitor:
+    # -- Create a Prometheus Operator ServiceMonitor for the metrics endpoint.
+    enabled: false
+    # -- Scrape interval.
+    interval: 30s
+    # -- Scrape timeout.
+    scrapeTimeout: 10s
+    # -- Additional labels for the ServiceMonitor (e.g. release: kube-prometheus-stack).
+    labels: {}
+
+# -- Port the health/readiness probe endpoint binds to inside the pod.
+healthProbePort: 8081
+
+# -- Resource requests/limits for the manager container.
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+# -- Pod-level security context. Matches the distroless nonroot image (UID 65532).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Annotations to add to the manager pod.
+podAnnotations: {}
+# -- Labels to add to the manager pod.
+podLabels: {}
+# -- Node selector for the manager pod.
+nodeSelector: {}
+# -- Tolerations for the manager pod.
+tolerations: []
+# -- Affinity rules for the manager pod.
+affinity: {}
+# -- Topology spread constraints for the manager pod.
+topologySpreadConstraints: []
+# -- Priority class name for the manager pod.
+priorityClassName: ""
+
+podDisruptionBudget:
+  # -- Create a PodDisruptionBudget (recommended when replicaCount > 1).
+  enabled: false
+  # -- Minimum available replicas. Set this or maxUnavailable, not both.
+  minAvailable: 1
+  # -- Maximum unavailable replicas.
+  maxUnavailable: ""
