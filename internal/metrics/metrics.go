@@ -37,6 +37,24 @@ var (
 		Help: "Number of namespaces a ModelCredential's Secret is currently synced into.",
 	}, []string{"credential"})
 
+	// CredentialCapacityTPM reports a credential's declared supply (tokens-per-minute capacity).
+	CredentialCapacityTPM = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tokencontrol_credential_capacity_tokens_per_minute",
+		Help: "Declared per-minute token capacity (supply) of a ModelCredential's key; 0 when unset.",
+	}, []string{"credential"})
+
+	// CredentialAllocatedTPM reports the summed per-minute token budget committed against a credential.
+	CredentialAllocatedTPM = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tokencontrol_credential_allocated_tokens_per_minute",
+		Help: "Summed per-minute token budget of policies that bind a ModelCredential (planning demand).",
+	}, []string{"credential"})
+
+	// CredentialOversubscribed is 1 when a credential's allocated demand exceeds its capacity.
+	CredentialOversubscribed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tokencontrol_credential_oversubscribed",
+		Help: "1 when a ModelCredential's allocated budgets exceed its declared capacity, else 0.",
+	}, []string{"credential"})
+
 	// EffectiveModels reports the number of permitted models per policy.
 	EffectiveModels = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "tokencontrol_effective_models",
@@ -62,6 +80,9 @@ func init() {
 		ModelViolations,
 		CredentialsInjected,
 		CredentialSyncedNamespaces,
+		CredentialCapacityTPM,
+		CredentialAllocatedTPM,
+		CredentialOversubscribed,
 		EffectiveModels,
 		GatewayArtifacts,
 		TokensConsumed,

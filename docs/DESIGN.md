@@ -145,6 +145,37 @@ limiting where a gateway is present.
 Workload teams therefore declare *intent* ("use the `openai` credential for `gpt-4o`") and
 never handle key material.
 
+### Capacity planning (supply vs demand)
+
+A provider key has a finite throughput ceiling (its org/project rate limit). token-control
+models this **supply** as `ModelCredential.spec.capacity` — the LLM analogue of a Node's
+allocatable capacity. Where policy quotas are *demand* (what consumers may take), capacity is
+*supply* (what the key can deliver):
+
+| Kubernetes | token-control |
+|------------|---------------|
+| Node `status.allocatable` | `ModelCredential.spec.capacity` |
+| Pod `requests` | `TokenPolicy` / `ClusterTokenPolicy` quotas |
+| scheduler checks Σ requests ≤ allocatable | controller checks Σ allocated ≤ capacity |
+| `Insufficient cpu` | `Oversubscribed` condition |
+
+The ModelCredential controller rolls this up during its normal reconcile (reusing the pass
+that computes `status.referencingPolicies`): every policy that **binds** the credential — an
+Allow rule naming it via `credentialRef`, or a `ClusterTokenPolicy` whose
+`defaultCredentialRef` is this key — contributes its `spec.quota`, summed field-wise into:
+
+- `status.allocated` — committed demand (a planning estimate, not a hard reservation; each
+  referencing policy's declared budget is summed once),
+- `status.available` — `capacity − allocated`, floored at zero, only for windows where
+  capacity declares a value,
+
+and the `Oversubscribed` condition (plus `tokencontrol_credential_oversubscribed`,
+`..._capacity_tokens_per_minute`, `..._allocated_tokens_per_minute` gauges) flips True when
+any window's commitments exceed capacity. This is **advisory planning only** — capacity does
+not rate-limit requests; live enforcement remains the gateway's responsibility. It exists so a
+platform team can answer "have we handed out more of this key than it can serve?" from
+declared values alone, without live metering.
+
 ### Request / admission flow
 
 ```
@@ -197,6 +228,9 @@ Prometheus collectors (registered on the controller-runtime registry, served on 
 | `tokencontrol_model_violations_total` | counter | namespace, provider, model, enforcement |
 | `tokencontrol_credentials_injected_total` | counter | namespace, credential |
 | `tokencontrol_credential_synced_namespaces` | gauge | credential |
+| `tokencontrol_credential_capacity_tokens_per_minute` | gauge | credential |
+| `tokencontrol_credential_allocated_tokens_per_minute` | gauge | credential |
+| `tokencontrol_credential_oversubscribed` | gauge | credential |
 | `tokencontrol_effective_models` | gauge | namespace, policy |
 | `tokencontrol_gateway_artifacts` | gauge | namespace, type |
 | `tokencontrol_tokens_consumed_total` | counter | namespace, workload, provider, model |

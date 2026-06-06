@@ -96,7 +96,7 @@ func (r *ModelCredentialReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Error(err, "failed to prune stale credential secrets")
 	}
 
-	refs, err := r.referencingPolicies(ctx, mc.Name)
+	refs, allocated, err := r.referencingPolicies(ctx, mc.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -104,6 +104,7 @@ func (r *ModelCredentialReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	mc.Status.ObservedGeneration = mc.Generation
 	mc.Status.SyncedNamespaces = synced
 	mc.Status.ReferencingPolicies = refs
+	r.reconcileCapacity(&mc, allocated)
 	setCondition(&mc.Status.Conditions, api.ConditionReady, metav1.ConditionTrue, "Synced",
 		fmt.Sprintf("synced to %d namespace(s)", len(synced)), mc.Generation)
 	metrics.CredentialSyncedNamespaces.WithLabelValues(mc.Name).Set(float64(len(synced)))
@@ -176,31 +177,43 @@ func (r *ModelCredentialReconciler) pruneSecrets(ctx context.Context, mc *api.Mo
 	return nil
 }
 
-func (r *ModelCredentialReconciler) referencingPolicies(ctx context.Context, name string) ([]string, error) {
+// referencingPolicies returns the policies that bind this credential and the planning
+// rollup of their token budgets. A policy "binds" the credential when one of its Allow
+// rules names it via credentialRef, or (for a ClusterTokenPolicy) when it is the default
+// credential. Each binding policy's spec.quota is summed field-wise into allocated; this is
+// a coarse planning estimate of committed demand, not a precise per-namespace reservation.
+func (r *ModelCredentialReconciler) referencingPolicies(ctx context.Context, name string) ([]string, *api.TokenQuota, error) {
 	set := map[string]struct{}{}
+	allocated := &api.TokenQuota{}
 
 	var ctpl api.ClusterTokenPolicyList
 	if err := r.List(ctx, &ctpl); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i := range ctpl.Items {
 		ctp := &ctpl.Items[i]
-		if ctp.Spec.DefaultCredentialRef != nil && ctp.Spec.DefaultCredentialRef.Name == name {
-			set["ClusterTokenPolicy/"+ctp.Name] = struct{}{}
-		}
-		if modelsReference(ctp.Spec.Models, name) {
-			set["ClusterTokenPolicy/"+ctp.Name] = struct{}{}
+		key := "ClusterTokenPolicy/" + ctp.Name
+		isDefault := ctp.Spec.DefaultCredentialRef != nil && ctp.Spec.DefaultCredentialRef.Name == name
+		if isDefault || modelsReference(ctp.Spec.Models, name) {
+			if _, seen := set[key]; !seen {
+				set[key] = struct{}{}
+				allocated = addQuota(allocated, ctp.Spec.Quota)
+			}
 		}
 	}
 
 	var tpl api.TokenPolicyList
 	if err := r.List(ctx, &tpl); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i := range tpl.Items {
 		tp := &tpl.Items[i]
 		if modelsReference(tp.Spec.Models, name) {
-			set[fmt.Sprintf("TokenPolicy/%s/%s", tp.Namespace, tp.Name)] = struct{}{}
+			key := fmt.Sprintf("TokenPolicy/%s/%s", tp.Namespace, tp.Name)
+			if _, seen := set[key]; !seen {
+				set[key] = struct{}{}
+				allocated = addQuota(allocated, tp.Spec.Quota)
+			}
 		}
 	}
 
@@ -209,7 +222,7 @@ func (r *ModelCredentialReconciler) referencingPolicies(ctx context.Context, nam
 		out = append(out, s)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out, normalizeQuota(allocated), nil
 }
 
 func modelsReference(models []api.ModelPermission, name string) bool {
@@ -226,6 +239,129 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// reconcileCapacity records the supply/demand planning rollup for a credential: allocated
+// (the summed budgets of referencing policies) versus the declared capacity, surfacing
+// available headroom and an Oversubscribed condition. Capacity is advisory and never blocks
+// reconciliation; live enforcement remains the gateway's responsibility.
+func (r *ModelCredentialReconciler) reconcileCapacity(mc *api.ModelCredential, allocated *api.TokenQuota) {
+	mc.Status.Allocated = allocated
+
+	capacity := mc.Spec.Capacity
+	if capacity == nil {
+		mc.Status.Available = nil
+		setCondition(&mc.Status.Conditions, api.ConditionOversubscribed, metav1.ConditionFalse,
+			"NoCapacityDeclared", "spec.capacity is not set; capacity planning is disabled", mc.Generation)
+		metrics.CredentialCapacityTPM.WithLabelValues(mc.Name).Set(0)
+		metrics.CredentialAllocatedTPM.WithLabelValues(mc.Name).Set(quotaTPM(allocated))
+		metrics.CredentialOversubscribed.WithLabelValues(mc.Name).Set(0)
+		return
+	}
+
+	mc.Status.Available = availableQuota(capacity, allocated)
+	over := oversubscribed(capacity, allocated)
+	if over {
+		setCondition(&mc.Status.Conditions, api.ConditionOversubscribed, metav1.ConditionTrue,
+			"AllocationExceedsCapacity", "committed policy budgets exceed the declared key capacity", mc.Generation)
+	} else {
+		setCondition(&mc.Status.Conditions, api.ConditionOversubscribed, metav1.ConditionFalse,
+			"WithinCapacity", "committed policy budgets are within the declared key capacity", mc.Generation)
+	}
+	metrics.CredentialCapacityTPM.WithLabelValues(mc.Name).Set(quotaTPM(capacity))
+	metrics.CredentialAllocatedTPM.WithLabelValues(mc.Name).Set(quotaTPM(allocated))
+	metrics.CredentialOversubscribed.WithLabelValues(mc.Name).Set(b2f(over))
+}
+
+// addQuota returns the field-wise sum of two quotas, treating nil fields as zero.
+func addQuota(a, b *api.TokenQuota) *api.TokenQuota {
+	return mapQuota2(a, b, func(x, y *int64) *int64 {
+		switch {
+		case x == nil && y == nil:
+			return nil
+		case x == nil:
+			v := *y
+			return &v
+		case y == nil:
+			v := *x
+			return &v
+		default:
+			v := *x + *y
+			return &v
+		}
+	})
+}
+
+// availableQuota returns capacity minus allocated per field, floored at zero. Fields where
+// capacity is unset stay nil (no capacity declared for that window).
+func availableQuota(capacity, allocated *api.TokenQuota) *api.TokenQuota {
+	return mapQuota2(capacity, allocated, func(cv, av *int64) *int64 {
+		if cv == nil {
+			return nil
+		}
+		used := int64(0)
+		if av != nil {
+			used = *av
+		}
+		v := *cv - used
+		if v < 0 {
+			v = 0
+		}
+		return &v
+	})
+}
+
+// oversubscribed reports whether any window's allocated demand exceeds the declared capacity.
+func oversubscribed(capacity, allocated *api.TokenQuota) bool {
+	if capacity == nil || allocated == nil {
+		return false
+	}
+	over := func(cv, av *int64) bool { return cv != nil && av != nil && *av > *cv }
+	return over(capacity.TokensPerMinute, allocated.TokensPerMinute) ||
+		over(capacity.RequestsPerMinute, allocated.RequestsPerMinute) ||
+		over(capacity.TokensPerDay, allocated.TokensPerDay) ||
+		over(capacity.TokensPerMonth, allocated.TokensPerMonth)
+}
+
+// mapQuota2 applies op to each corresponding field of a and b and normalizes the result.
+func mapQuota2(a, b *api.TokenQuota, op func(x, y *int64) *int64) *api.TokenQuota {
+	if a == nil {
+		a = &api.TokenQuota{}
+	}
+	if b == nil {
+		b = &api.TokenQuota{}
+	}
+	return normalizeQuota(&api.TokenQuota{
+		TokensPerMinute:   op(a.TokensPerMinute, b.TokensPerMinute),
+		RequestsPerMinute: op(a.RequestsPerMinute, b.RequestsPerMinute),
+		TokensPerDay:      op(a.TokensPerDay, b.TokensPerDay),
+		TokensPerMonth:    op(a.TokensPerMonth, b.TokensPerMonth),
+	})
+}
+
+// normalizeQuota returns nil when every field is unset so empty quotas don't appear in status.
+func normalizeQuota(q *api.TokenQuota) *api.TokenQuota {
+	if q == nil {
+		return nil
+	}
+	if q.TokensPerMinute == nil && q.RequestsPerMinute == nil && q.TokensPerDay == nil && q.TokensPerMonth == nil {
+		return nil
+	}
+	return q
+}
+
+func quotaTPM(q *api.TokenQuota) float64 {
+	if q == nil || q.TokensPerMinute == nil {
+		return 0
+	}
+	return float64(*q.TokensPerMinute)
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (r *ModelCredentialReconciler) SetupWithManager(mgr ctrl.Manager) error {

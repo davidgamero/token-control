@@ -76,6 +76,17 @@ type ModelCredentialSpec struct {
 	// Injection controls how the credential is delivered to authorized workloads.
 	// +optional
 	Injection *CredentialInjection `json:"injection,omitempty"`
+
+	// Capacity declares the total provider-side throughput this key can deliver -- its
+	// *supply*. It is the LLM analogue of a Node's allocatable capacity: workload/namespace
+	// budgets (TokenPolicy quotas) are the demand drawn against it. The controller rolls up
+	// the budgets of policies that bind this credential and reports allocated vs available in
+	// status, flagging Oversubscribed when commitments exceed capacity.
+	//
+	// Capacity is advisory and used for capacity *planning* only; it does not itself
+	// rate-limit requests (live enforcement remains the gateway's job).
+	// +optional
+	Capacity *TokenQuota `json:"capacity,omitempty"`
 }
 
 // ModelCredentialStatus reports the observed state of a ModelCredential.
@@ -96,6 +107,17 @@ type ModelCredentialStatus struct {
 	// +optional
 	ReferencingPolicies []string `json:"referencingPolicies,omitempty"`
 
+	// Allocated is the planning rollup of token budgets committed against this credential:
+	// the field-wise sum of the quotas of every policy in ReferencingPolicies. It is a
+	// planning estimate of demand, not a hard reservation.
+	// +optional
+	Allocated *TokenQuota `json:"allocated,omitempty"`
+
+	// Available is Capacity minus Allocated (per field, floored at zero). It is only
+	// populated for windows where Capacity declares a value.
+	// +optional
+	Available *TokenQuota `json:"available,omitempty"`
+
 	// Conditions represent the latest available observations of the credential's state.
 	// +optional
 	// +listType=map
@@ -110,6 +132,8 @@ type ModelCredentialStatus struct {
 // +kubebuilder:resource:scope=Cluster,shortName=mc,categories=governance;llm
 // +kubebuilder:printcolumn:name="Provider",type=string,JSONPath=`.spec.provider`
 // +kubebuilder:printcolumn:name="SecretResolved",type=boolean,JSONPath=`.status.secretResolved`
+// +kubebuilder:printcolumn:name="CapacityTPM",type=integer,JSONPath=`.spec.capacity.tokensPerMinute`,priority=1
+// +kubebuilder:printcolumn:name="AllocatedTPM",type=integer,JSONPath=`.status.allocated.tokensPerMinute`,priority=1
 // +kubebuilder:printcolumn:name="Synced",type=integer,JSONPath=`.status.syncedNamespaces`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type ModelCredential struct {

@@ -29,6 +29,10 @@ operator.
   replicated only to authorized namespaces and **injected** into governed pods automatically.
   Teams declare intent; they never handle key material.
 - **Token/request budgets** that compose down the hierarchy (field-wise minimum).
+- **Capacity planning** — declare each provider key's throughput ceiling
+  (`ModelCredential.spec.capacity`, the supply-side analogue of a Node's allocatable); the
+  controller rolls up committed policy budgets into `status.allocated`/`available` and flags an
+  `Oversubscribed` condition when demand exceeds supply (advisory; not a live rate limit).
 - **Admission enforcement** — `Enforce` (reject), `Audit` (warn) or `Disabled`, evaluated by
   validating/mutating pod webhooks.
 - **Optional gateway integration** — generate `Envoy AI Gateway` `BackendTrafficPolicy` or
@@ -43,7 +47,7 @@ operator.
 |------|-------|---------|
 | `ClusterTokenPolicy` | Cluster | Default allowlist/quota/enforcement/gateway for selected namespaces (broadest tier). |
 | `TokenPolicy` | Namespaced | Namespace-default (empty selector) or workload-scoped (selector) policy; may only narrow what it inherits. |
-| `ModelCredential` | Cluster | Binds a provider credential to authorized namespaces/models and defines how it is injected. |
+| `ModelCredential` | Cluster | Binds a provider credential to authorized namespaces/models, defines how it is injected, and (optionally) declares the key's throughput `capacity` for planning. |
 
 API group: `governance.tokencontrol.io/v1alpha1`. See [`docs/DESIGN.md`](docs/DESIGN.md) for
 the full architecture and the resolver semantics.
@@ -136,10 +140,12 @@ A namespace can also be excluded ad hoc by labeling it
 
 The manager serves Prometheus metrics on `:8080`, including
 `tokencontrol_admission_decisions_total`, `tokencontrol_model_violations_total`,
-`tokencontrol_credentials_injected_total`, `tokencontrol_credential_synced_namespaces` and
-`tokencontrol_gateway_artifacts`. Enable `metrics.serviceMonitor.enabled=true` to scrape with
-the Prometheus Operator. `tokencontrol_tokens_consumed_total` is advisory and fed by an
-external usage reporter (typically the gateway).
+`tokencontrol_credentials_injected_total`, `tokencontrol_credential_synced_namespaces`,
+`tokencontrol_credential_{capacity,allocated}_tokens_per_minute`,
+`tokencontrol_credential_oversubscribed` and `tokencontrol_gateway_artifacts`. Enable
+`metrics.serviceMonitor.enabled=true` to scrape with the Prometheus Operator.
+`tokencontrol_tokens_consumed_total` is advisory and fed by an external usage reporter
+(typically the gateway).
 
 ## Development
 

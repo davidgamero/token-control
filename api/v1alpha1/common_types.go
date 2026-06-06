@@ -241,4 +241,7 @@ const (
 	ConditionGatewaySynced = "GatewaySynced"
 	// ConditionSecretResolved indicates a ModelCredential's source Secret was found.
 	ConditionSecretResolved = "SecretResolved"
+	// ConditionOversubscribed indicates a ModelCredential's allocated token budgets exceed
+	// its declared capacity (a planning signal; it does not block reconciliation).
+	ConditionOversubscribed = "Oversubscribed"
 )
