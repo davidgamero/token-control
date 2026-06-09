@@ -1,0 +1,6 @@
+---
+# Namespace used by all integration tests.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tc-test

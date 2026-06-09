@@ -1,0 +1,16 @@
+---
+# ModelClaim: workload team declares intent to call gpt-4o; selected by label.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: ModelClaim
+metadata:
+  name: test-claim
+  namespace: tc-test
+spec:
+  selector:
+    podSelector:
+      matchLabels:
+        app: tc-test-caller
+  purpose: "integration test — verify routing through fake LLM"
+  models:
+    - provider: openai
+      model: gpt-4o

@@ -1,0 +1,43 @@
+---
+# Source API-key secret (lives only in operator namespace; injected by token-control).
+# In tests this is created in token-control-system by the test suite before these fixtures.
+#
+# ClusterTokenPolicy: allow gpt-4o and gpt-4o-mini cluster-wide; deny everything else.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: ClusterTokenPolicy
+metadata:
+  name: tc-test-cluster
+spec:
+  enforcement: Enforce
+  models:
+    - provider: openai
+      model: "gpt-4o"
+      action: Allow
+      credentialRef:
+        name: openai-test
+    - provider: openai
+      model: "gpt-4o-mini"
+      action: Allow
+      credentialRef:
+        name: openai-test
+    - provider: "*"
+      model: "*"
+      action: Deny
+---
+# ModelCredential: binds the fake-llm key to the tc-test namespace.
+apiVersion: governance.tokencontrol.io/v1alpha1
+kind: ModelCredential
+metadata:
+  name: openai-test
+spec:
+  provider: openai
+  models:
+    - "gpt-4o*"
+  secretRef:
+    name: openai-test
+    namespace: token-control-system
+    key: apiKey
+  allowedNamespaces:
+    - tc-test
+  injection:
+    mode: Env

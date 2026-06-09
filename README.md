@@ -1,5 +1,7 @@
 # token-control
 
+> **Vision and roadmap: [`docs/VISION.md`](docs/VISION.md)**
+
 Kubernetes-native governance for LLM/model access. token-control makes "which workloads may
 call which models, with which credentials, under what token budget" a **first-class,
 namespaced cluster resource** — the governance analogue of `ResourceQuota`/`LimitRange`, but
